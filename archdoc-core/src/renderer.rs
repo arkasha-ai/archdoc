@@ -28,7 +28,9 @@ impl Renderer {
         handlebars.register_template_string("architecture_md", Self::architecture_md_template())
             .expect("Failed to register architecture_md template");
         
-        // TODO: Register other templates
+        // Register module documentation template
+        handlebars.register_template_string("module_md", Self::module_md_template())
+            .expect("Failed to register module_md template");
         
         Self {
             templates: handlebars,
@@ -151,6 +153,82 @@ impl Renderer {
 "#
     }
     
+    fn module_md_template() -> &'static str {
+        r#"# Module: {{{module_name}}}
+
+{{{module_summary}}}
+
+## Symbols
+
+{{#each symbols}}
+### {{{name}}}
+
+{{{signature}}}
+
+{{{docstring}}}
+
+**Type:** {{{kind}}}
+
+**Metrics:**
+- Fan-in: {{{fan_in}}}
+- Fan-out: {{{fan_out}}}
+{{#if is_critical}}
+- Critical: Yes
+{{/if}}
+
+{{/each}}
+
+## Dependencies
+
+### Imports
+{{#each imports}}
+- {{{this}}}
+{{/each}}
+
+### Outbound Modules
+{{#each outbound_modules}}
+- {{{this}}}
+{{/each}}
+
+### Inbound Modules
+{{#each inbound_modules}}
+- {{{this}}}
+{{/each}}
+
+## Integrations
+
+{{#if has_db_integrations}}
+### Database Integrations
+{{#each db_symbols}}
+- {{{this}}}
+{{/each}}
+{{/if}}
+
+{{#if has_http_integrations}}
+### HTTP/API Integrations
+{{#each http_symbols}}
+- {{{this}}}
+{{/each}}
+{{/if}}
+
+{{#if has_queue_integrations}}
+### Queue Integrations
+{{#each queue_symbols}}
+- {{{this}}}
+{{/each}}
+{{/if}}
+
+## Usage Examples
+
+{{#each usage_examples}}
+```python
+{{{this}}}
+```
+
+{{/each}}
+"#
+    }
+    
     pub fn render_architecture_md(&self, model: &ProjectModel) -> Result<String, anyhow::Error> {
         // Collect integration information
         let mut db_integrations = Vec::new();
@@ -186,6 +264,72 @@ impl Renderer {
         
         self.templates.render("architecture_md", &data)
             .map_err(|e| anyhow::anyhow!("Failed to render architecture.md: {}", e))
+    }
+    
+    pub fn render_module_md(&self, model: &ProjectModel, module_id: &str) -> Result<String, anyhow::Error> {
+        // Find the module in the project model
+        let module = model.modules.get(module_id)
+            .ok_or_else(|| anyhow::anyhow!("Module {} not found", module_id))?;
+        
+        // Collect symbols for this module
+        let mut symbols = Vec::new();
+        for symbol_id in &module.symbols {
+            if let Some(symbol) = model.symbols.get(symbol_id) {
+                symbols.push(serde_json::json!({
+                    "name": symbol.qualname,
+                    "signature": symbol.signature,
+                    "docstring": symbol.docstring_first_line.as_deref().unwrap_or("No documentation available"),
+                    "kind": format!("{:?}", symbol.kind),
+                    "fan_in": symbol.metrics.fan_in,
+                    "fan_out": symbol.metrics.fan_out,
+                    "is_critical": symbol.metrics.is_critical,
+                }));
+            }
+        }
+        
+        // Collect integration information for this module
+        let mut db_symbols = Vec::new();
+        let mut http_symbols = Vec::new();
+        let mut queue_symbols = Vec::new();
+        
+        for symbol_id in &module.symbols {
+            if let Some(symbol) = model.symbols.get(symbol_id) {
+                if symbol.integrations_flags.db {
+                    db_symbols.push(symbol.qualname.clone());
+                }
+                if symbol.integrations_flags.http {
+                    http_symbols.push(symbol.qualname.clone());
+                }
+                if symbol.integrations_flags.queue {
+                    queue_symbols.push(symbol.qualname.clone());
+                }
+            }
+        }
+        
+        // Prepare usage examples (for now, just placeholders)
+        let usage_examples = vec![
+            "// Example usage of module functions\n// TODO: Add real usage examples based on module analysis".to_string()
+        ];
+        
+        // Prepare data for template
+        let data = serde_json::json!({
+            "module_name": module_id,
+            "module_summary": module.doc_summary.as_deref().unwrap_or("No summary available"),
+            "symbols": symbols,
+            "imports": model.files.get(&module.files[0]).map(|f| f.imports.clone()).unwrap_or_default(),
+            "outbound_modules": module.outbound_modules,
+            "inbound_modules": module.inbound_modules,
+            "has_db_integrations": !db_symbols.is_empty(),
+            "has_http_integrations": !http_symbols.is_empty(),
+            "has_queue_integrations": !queue_symbols.is_empty(),
+            "db_symbols": db_symbols,
+            "http_symbols": http_symbols,
+            "queue_symbols": queue_symbols,
+            "usage_examples": usage_examples,
+        });
+        
+        self.templates.render("module_md", &data)
+            .map_err(|e| anyhow::anyhow!("Failed to render module.md: {}", e))
     }
     
     pub fn render_integrations_section(&self, model: &ProjectModel) -> Result<String, anyhow::Error> {

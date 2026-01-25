@@ -325,9 +325,19 @@ fn generate_docs(model: &ProjectModel, out: &str) -> Result<()> {
     // Create individual documentation files for modules and files
     for (module_id, _module) in &model.modules {
         let module_doc_path = modules_path.join(format!("{}.md", sanitize_filename(module_id)));
-        let module_content = format!("# Module: {}\n\nTODO: Add module documentation\n", module_id);
-        std::fs::write(&module_doc_path, module_content)
-            .map_err(|e| anyhow::anyhow!("Failed to create module doc {}: {}", module_doc_path.display(), e))?;
+        match renderer.render_module_md(model, module_id) {
+            Ok(module_content) => {
+                std::fs::write(&module_doc_path, module_content)
+                    .map_err(|e| anyhow::anyhow!("Failed to create module doc {}: {}", module_doc_path.display(), e))?;
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to render module doc for {}: {}", module_id, e);
+                // Fallback to simple template
+                let module_content = format!("# Module: {}\n\nTODO: Add module documentation\n", module_id);
+                std::fs::write(&module_doc_path, module_content)
+                    .map_err(|e| anyhow::anyhow!("Failed to create module doc {}: {}", module_doc_path.display(), e))?;
+            }
+        }
     }
     
     for (_file_id, file_doc) in &model.files {
