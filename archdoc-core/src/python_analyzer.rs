@@ -164,7 +164,7 @@ impl PythonAnalyzer {
         }
     }
     
-    fn extract_docstring(&self, body: &[Stmt]) -> Option<String> {
+    fn extract_docstring(&self, _body: &[Stmt]) -> Option<String> {
         // For now, just return None until we figure out the correct way to extract docstrings
         // TODO: Implement proper docstring extraction
         None
@@ -213,11 +213,13 @@ impl PythonAnalyzer {
         flags
     }
     
+    #[allow(dead_code)]
     fn extract_function_def(&self, _func_def: &StmtFunctionDef, _symbols: &mut Vec<Symbol>, _calls: &mut Vec<Call>, _depth: usize) {
         // Extract function information
         // This is a simplified implementation - a full implementation would extract more details
     }
     
+    #[allow(dead_code)]
     fn extract_class_def(&self, _class_def: &StmtClassDef, _symbols: &mut Vec<Symbol>, _depth: usize) {
         // Extract class information
         // This is a simplified implementation - a full implementation would extract more details

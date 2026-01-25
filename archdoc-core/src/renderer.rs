@@ -6,6 +6,16 @@
 use crate::model::ProjectModel;
 use handlebars::Handlebars;
 
+fn sanitize_for_link(filename: &str) -> String {
+    filename
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c => c,
+        })
+        .collect()
+}
+
 pub struct Renderer {
     templates: Handlebars<'static>,
 }
@@ -243,7 +253,7 @@ impl Renderer {
             layout_items.push(serde_json::json!({
                 "path": file_doc.path,
                 "purpose": "Source file",
-                "link": format!("docs/architecture/files/{}.md", file_id)
+                "link": format!("docs/architecture/files/{}.md", sanitize_for_link(&file_doc.path))
             }));
         }
         
@@ -280,7 +290,7 @@ impl Renderer {
                 "symbol_count": module.symbols.len(),
                 "inbound_count": module.inbound_modules.len(),
                 "outbound_count": module.outbound_modules.len(),
-                "link": format!("docs/architecture/modules/{}.md", module_id)
+                "link": format!("docs/architecture/modules/{}.md", sanitize_for_link(module_id))
             }));
         }
         

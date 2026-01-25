@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use anyhow::Result;
 use archdoc_core::{Config, ProjectModel, scanner::FileScanner, python_analyzer::PythonAnalyzer};
 use std::path::Path;
+use std::collections::HashSet;
 
 /// CLI interface for ArchDoc
 #[derive(Parser)]
@@ -96,15 +97,10 @@ fn init_project(root: &str, out: &str) -> Result<()> {
     std::fs::create_dir_all(out_path)
         .map_err(|e| anyhow::anyhow!("Failed to create output directory: {}", e))?;
     
-    // Create docs/architecture directory structure
-    let docs_arch_path = out_path.join("docs").join("architecture");
-    std::fs::create_dir_all(&docs_arch_path)
-        .map_err(|e| anyhow::anyhow!("Failed to create docs/architecture directory: {}", e))?;
-    
     // Create modules and files directories
-    std::fs::create_dir_all(docs_arch_path.join("modules"))
+    std::fs::create_dir_all(out_path.join("modules"))
         .map_err(|e| anyhow::anyhow!("Failed to create modules directory: {}", e))?;
-    std::fs::create_dir_all(docs_arch_path.join("files"))
+    std::fs::create_dir_all(out_path.join("files"))
         .map_err(|e| anyhow::anyhow!("Failed to create files directory: {}", e))?;
     
     // Create default ARCHITECTURE.md template
@@ -248,7 +244,7 @@ max_cache_age = "24h"
     println!("Created:");
     println!("  - {}", architecture_md_path.display());
     println!("  - {}", config_toml_path.display());
-    println!("  - {} (directory structure)", docs_arch_path.display());
+    println!("  - {} (directory structure)", out_path.display());
     
     Ok(())
 }
@@ -290,9 +286,32 @@ fn analyze_project(root: &str, config: &Config) -> Result<ProjectModel> {
         .map_err(|e| anyhow::anyhow!("Failed to resolve symbols: {}", e))
 }
 
+fn sanitize_filename(filename: &str) -> String {
+    filename
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c => c,
+        })
+        .collect()
+}
+
 fn generate_docs(model: &ProjectModel, out: &str) -> Result<()> {
     // TODO: Implement documentation generation
     println!("Generating docs to {}", out);
+    
+    // Create output directory structure if needed
+    let out_path = std::path::Path::new(out);
+    std::fs::create_dir_all(out_path)
+        .map_err(|e| anyhow::anyhow!("Failed to create output directory: {}", e))?;
+    
+    // Create modules and files directories
+    let modules_path = out_path.join("modules");
+    let files_path = out_path.join("files");
+    std::fs::create_dir_all(&modules_path)
+        .map_err(|e| anyhow::anyhow!("Failed to create modules directory: {}", e))?;
+    std::fs::create_dir_all(&files_path)
+        .map_err(|e| anyhow::anyhow!("Failed to create files directory: {}", e))?;
     
     // Initialize renderer
     let renderer = archdoc_core::renderer::Renderer::new();
@@ -303,6 +322,21 @@ fn generate_docs(model: &ProjectModel, out: &str) -> Result<()> {
     // Write to file - ARCHITECTURE.md should be in the project root, not output directory
     // The out parameter is for the docs/architecture directory structure
     let output_path = std::path::Path::new(".").join("ARCHITECTURE.md");
+    
+    // Create individual documentation files for modules and files
+    for (module_id, module) in &model.modules {
+        let module_doc_path = modules_path.join(format!("{}.md", sanitize_filename(module_id)));
+        let module_content = format!("# Module: {}\n\nTODO: Add module documentation\n", module_id);
+        std::fs::write(&module_doc_path, module_content)
+            .map_err(|e| anyhow::anyhow!("Failed to create module doc {}: {}", module_doc_path.display(), e))?;
+    }
+    
+    for (file_id, file_doc) in &model.files {
+        let file_doc_path = files_path.join(format!("{}.md", sanitize_filename(&file_doc.path)));
+        let file_content = format!("# File: {}\n\nTODO: Add file documentation\n", file_doc.path);
+        std::fs::write(&file_doc_path, file_content)
+            .map_err(|e| anyhow::anyhow!("Failed to create file doc {}: {}", file_doc_path.display(), e))?;
+    }
     
     // Render and update each section individually
     
