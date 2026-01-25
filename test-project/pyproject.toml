@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "test-project"
+version = "0.1.0"
+description = "A test project for ArchDoc"
+authors = [
+    {name = "Test Author", email = "test@example.com"}
+]
+dependencies = [
+    "requests>=2.25.0",
+    "sqlite3"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "black",
+    "flake8"
+]

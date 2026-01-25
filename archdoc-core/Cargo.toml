@@ -1,0 +1,18 @@
+[package]
+name = "archdoc-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.9.11+spec-1.1.0"
+tracing = "0.1"
+anyhow = "1.0"
+thiserror = "2.0.18"
+walkdir = "2.3"
+handlebars = "6.4.0"
+rustpython-parser = "0.4"
+rustpython-ast = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+tempfile = "3.10"

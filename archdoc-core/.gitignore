@@ -1,0 +1,12 @@
+# Compiled files
+target/
+
+# IDE files
+*.swp
+.DS_Store
+
+# Backup files
+*.rs.bk
+
+# Documentation files
+doc/

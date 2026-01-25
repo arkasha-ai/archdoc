@@ -1,0 +1,11 @@
+# IDE files
+*.swp
+.DS_Store
+
+# Backup files
+*.rs.bk
+
+# Project specific files
+.archdoc/
+.roo/
+PLANS/
