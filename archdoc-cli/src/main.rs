@@ -2,7 +2,6 @@ use clap::{Parser, Subcommand};
 use anyhow::Result;
 use archdoc_core::{Config, ProjectModel, scanner::FileScanner, python_analyzer::PythonAnalyzer};
 use std::path::Path;
-use std::collections::HashSet;
 
 /// CLI interface for ArchDoc
 #[derive(Parser)]
@@ -324,14 +323,14 @@ fn generate_docs(model: &ProjectModel, out: &str) -> Result<()> {
     let output_path = std::path::Path::new(".").join("ARCHITECTURE.md");
     
     // Create individual documentation files for modules and files
-    for (module_id, module) in &model.modules {
+    for (module_id, _module) in &model.modules {
         let module_doc_path = modules_path.join(format!("{}.md", sanitize_filename(module_id)));
         let module_content = format!("# Module: {}\n\nTODO: Add module documentation\n", module_id);
         std::fs::write(&module_doc_path, module_content)
             .map_err(|e| anyhow::anyhow!("Failed to create module doc {}: {}", module_doc_path.display(), e))?;
     }
     
-    for (file_id, file_doc) in &model.files {
+    for (_file_id, file_doc) in &model.files {
         let file_doc_path = files_path.join(format!("{}.md", sanitize_filename(&file_doc.path)));
         let file_content = format!("# File: {}\n\nTODO: Add file documentation\n", file_doc.path);
         std::fs::write(&file_doc_path, file_content)

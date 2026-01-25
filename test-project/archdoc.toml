@@ -1,0 +1,62 @@
+[project]
+root = "."
+out_dir = "docs/architecture"
+entry_file = "ARCHITECTURE.md"
+language = "python"
+
+[scan]
+include = ["src", "app", "tests"]
+exclude = [
+    ".venv", "venv", "__pycache__", ".git", "dist", "build",
+    ".mypy_cache", ".ruff_cache", ".pytest_cache", "*.egg-info"
+]
+follow_symlinks = false
+max_file_size = "10MB"
+
+[python]
+src_roots = ["src", "."]
+include_tests = true
+parse_docstrings = true
+max_parse_errors = 10
+
+[analysis]
+resolve_calls = true
+resolve_inheritance = false
+detect_integrations = true
+integration_patterns = [
+    { type = "http", patterns = ["requests", "httpx", "aiohttp"] },
+    { type = "db", patterns = ["sqlalchemy", "psycopg", "mysql", "sqlite3"] },
+    { type = "queue", patterns = ["celery", "kafka", "pika", "redis"] }
+]
+
+[output]
+single_file = false
+per_file_docs = true
+create_directories = true
+overwrite_manual_sections = false
+
+[diff]
+update_timestamp_on_change_only = true
+hash_algorithm = "sha256"
+preserve_manual_content = true
+
+[thresholds]
+critical_fan_in = 20
+critical_fan_out = 20
+high_complexity = 50
+
+[rendering]
+template_engine = "handlebars"
+max_table_rows = 100
+truncate_long_descriptions = true
+description_max_length = 200
+
+[logging]
+level = "info"
+file = "archdoc.log"
+format = "compact"
+
+[caching]
+enabled = true
+cache_dir = ".archdoc/cache"
+max_cache_age = "24h"

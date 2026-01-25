@@ -249,7 +249,7 @@ impl Renderer {
         // Collect layout information from files
         let mut layout_items = Vec::new();
         
-        for (file_id, file_doc) in &model.files {
+        for (_file_id, file_doc) in &model.files {
             layout_items.push(serde_json::json!({
                 "path": file_doc.path,
                 "purpose": "Source file",
