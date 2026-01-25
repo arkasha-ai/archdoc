@@ -34,9 +34,9 @@ No tooling information available.
 
 | Path | Purpose | Link |
 |------|---------|------|
-| ./src/core.py | Source file | [details](docs/architecture/files/._src_core.py.md) |
 | ./src/__init__.py | Source file | [details](docs/architecture/files/._src___init__.py.md) |
 | ./src/utils.py | Source file | [details](docs/architecture/files/._src_utils.py.md) |
+| ./src/core.py | Source file | [details](docs/architecture/files/._src_core.py.md) |
 <!-- ARCHDOC:END section=layout -->
 
 ---
@@ -47,8 +47,8 @@ No tooling information available.
 | Module | Symbols | Inbound | Outbound | Link |
 |--------|---------|---------|----------|------|
 | ./src/__init__.py | 0 | 0 | 0 | [details](docs/architecture/modules/._src___init__.py.md) |
-| ./src/core.py | 6 | 0 | 0 | [details](docs/architecture/modules/._src_core.py.md) |
 | ./src/utils.py | 4 | 0 | 0 | [details](docs/architecture/modules/._src_utils.py.md) |
+| ./src/core.py | 6 | 0 | 0 | [details](docs/architecture/modules/._src_core.py.md) |
 <!-- ARCHDOC:END section=modules_index -->
 
 ---

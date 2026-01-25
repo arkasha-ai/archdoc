@@ -520,4 +520,133 @@ impl Renderer {
         handlebars.render("critical_points", &data)
             .map_err(|e| anyhow::anyhow!("Failed to render critical points section: {}", e))
     }
+    
+    pub fn render_layout_md(&self, model: &ProjectModel) -> Result<String, anyhow::Error> {
+        // Collect layout information from files
+        let mut layout_items = Vec::new();
+        
+        for (_file_id, file_doc) in &model.files {
+            layout_items.push(serde_json::json!({
+                "path": file_doc.path,
+                "purpose": "Source file",
+                "link": format!("files/{}.md", sanitize_for_link(&file_doc.path))
+            }));
+        }
+        
+        // Prepare data for layout template
+        let data = serde_json::json!({
+            "layout_items": layout_items,
+        });
+        
+        // Create template for layout.md
+        let layout_template = r#"# Repository layout
+
+<!-- MANUAL:BEGIN -->
+## Manual overrides
+- `src/app/` — <FILL_MANUALLY>
+<!-- MANUAL:END -->
+
+---
+
+## Detected structure
+<!-- ARCHDOC:BEGIN section=layout_detected -->
+> Generated. Do not edit inside this block.
+| Path | Purpose | Link |
+|------|---------|------|
+{{#each layout_items}}
+| {{{path}}} | {{{purpose}}} | [details]({{{link}}}) |
+{{/each}}
+<!-- ARCHDOC:END section=layout_detected -->
+"#;
+        
+        let mut handlebars = Handlebars::new();
+        handlebars.register_template_string("layout_md", layout_template)
+            .map_err(|e| anyhow::anyhow!("Failed to register layout_md template: {}", e))?;
+        
+        handlebars.render("layout_md", &data)
+            .map_err(|e| anyhow::anyhow!("Failed to render layout.md: {}", e))
+    }
+    
+    pub fn render_symbol_details(&self, model: &ProjectModel, symbol_id: &str) -> Result<String, anyhow::Error> {
+        // Find the symbol in the project model
+        let symbol = model.symbols.get(symbol_id)
+            .ok_or_else(|| anyhow::anyhow!("Symbol {} not found", symbol_id))?;
+        
+        // Prepare data for symbol template
+        let data = serde_json::json!({
+            "symbol_id": symbol_id,
+            "qualname": symbol.qualname,
+            "kind": format!("{:?}", symbol.kind),
+            "signature": symbol.signature,
+            "docstring": symbol.docstring_first_line.as_deref().unwrap_or("No documentation available"),
+            "purpose": symbol.purpose,
+            "integrations": {
+                "http": symbol.integrations_flags.http,
+                "db": symbol.integrations_flags.db,
+                "queue": symbol.integrations_flags.queue,
+            },
+            "metrics": {
+                "fan_in": symbol.metrics.fan_in,
+                "fan_out": symbol.metrics.fan_out,
+                "is_critical": symbol.metrics.is_critical,
+                "cycle_participant": symbol.metrics.cycle_participant,
+            },
+            "outbound_calls": symbol.outbound_calls,
+            "inbound_calls": symbol.inbound_calls,
+        });
+        
+        // Create template for symbol details
+        let symbol_template = r#"<a id="{{symbol_id}}"></a>
+
+### `{{qualname}}`
+- **Kind:** {{kind}}
+- **Signature:** `{{{signature}}}`
+- **Docstring:** `{{{docstring}}}`
+
+#### What it does
+<!-- ARCHDOC:BEGIN section=purpose -->
+{{{purpose}}}
+<!-- ARCHDOC:END section=purpose -->
+
+#### Relations
+<!-- ARCHDOC:BEGIN section=relations -->
+**Outbound calls (best-effort):**
+{{#each outbound_calls}}
+- {{{this}}}
+{{/each}}
+
+**Inbound (used by) (best-effort):**
+{{#each inbound_calls}}
+- {{{this}}}
+{{/each}}
+<!-- ARCHDOC:END section=relations -->
+
+#### Integrations (heuristic)
+<!-- ARCHDOC:BEGIN section=integrations -->
+- HTTP: {{#if integrations.http}}yes{{else}}no{{/if}}
+- DB: {{#if integrations.db}}yes{{else}}no{{/if}}
+- Queue/Tasks: {{#if integrations.queue}}yes{{else}}no{{/if}}
+<!-- ARCHDOC:END section=integrations -->
+
+#### Risk / impact
+<!-- ARCHDOC:BEGIN section=impact -->
+- fan-in: {{{metrics.fan_in}}}
+- fan-out: {{{metrics.fan_out}}}
+- cycle participant: {{#if metrics.cycle_participant}}yes{{else}}no{{/if}}
+- critical: {{#if metrics.is_critical}}yes{{else}}no{{/if}}
+<!-- ARCHDOC:END section=impact -->
+
+<!-- MANUAL:BEGIN -->
+#### Manual notes
+<FILL_MANUALLY>
+<!-- MANUAL:END -->
+"#;
+        
+        let mut handlebars = Handlebars::new();
+        handlebars.register_template_string("symbol_details", symbol_template)
+            .map_err(|e| anyhow::anyhow!("Failed to register symbol_details template: {}", e))?;
+        
+        handlebars.render("symbol_details", &data)
+            .map_err(|e| anyhow::anyhow!("Failed to render symbol details: {}", e))
+    }
 }

@@ -149,7 +149,7 @@ impl PythonAnalyzer {
                 };
                 symbols.push(symbol);
                 
-                // Recursively process class body
+                // Recursively process class body for methods
                 for body_stmt in &class_def.body {
                     self.extract_from_statement(body_stmt, Some(&class_def.name), imports, symbols, calls, depth + 1);
                 }
@@ -164,9 +164,18 @@ impl PythonAnalyzer {
         }
     }
     
-    fn extract_docstring(&self, _body: &[Stmt]) -> Option<String> {
-        // For now, just return None until we figure out the correct way to extract docstrings
-        // TODO: Implement proper docstring extraction
+    fn extract_docstring(&self, body: &[Stmt]) -> Option<String> {
+        // Extract the first statement if it's a string expression (docstring)
+        if let Some(first_stmt) = body.first() {
+            if let Stmt::Expr(expr_stmt) = first_stmt {
+                if let Expr::Constant(constant_expr) = &*expr_stmt.value {
+                    if let Some(docstring) = constant_expr.value.as_str() {
+                        // Return the first line of the docstring
+                        return docstring.lines().next().map(|s| s.to_string());
+                    }
+                }
+            }
+        }
         None
     }
     
