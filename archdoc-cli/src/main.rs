@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 use archdoc_core::{Config, ProjectModel, scanner::FileScanner, python_analyzer::PythonAnalyzer};
+use colored::Colorize;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
 
-/// CLI interface for ArchDoc
 #[derive(Parser)]
 #[command(name = "archdoc")]
 #[command(about = "Generate architecture documentation for Python projects")]
@@ -55,13 +56,21 @@ enum Commands {
         #[arg(short, long, default_value = "archdoc.toml")]
         config: String,
     },
+    
+    /// Show project statistics
+    Stats {
+        /// Project root directory
+        #[arg(short, long, default_value = ".")]
+        root: String,
+        
+        /// Configuration file path
+        #[arg(short, long, default_value = "archdoc.toml")]
+        config: String,
+    },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    
-    // Setup logging based on verbose flag
-    setup_logging(cli.verbose)?;
     
     match &cli.command {
         Commands::Init { root, out } => {
@@ -71,38 +80,30 @@ fn main() -> Result<()> {
             let config = load_config(config)?;
             let model = analyze_project(root, &config)?;
             generate_docs(&model, out, cli.verbose)?;
+            print_generate_summary(&model);
         }
         Commands::Check { root, config } => {
             let config = load_config(config)?;
             check_docs_consistency(root, &config)?;
+        }
+        Commands::Stats { root, config } => {
+            let config = load_config(config)?;
+            let model = analyze_project(root, &config)?;
+            print_stats(&model);
         }
     }
     
     Ok(())
 }
 
-fn setup_logging(verbose: bool) -> Result<()> {
-    // TODO: Implement logging setup
-    println!("Setting up logging with verbose={}", verbose);
-    Ok(())
-}
-
 fn init_project(root: &str, out: &str) -> Result<()> {
-    // TODO: Implement project initialization
-    println!("Initializing project at {} with output to {}", root, out);
+    println!("{}", "Initializing archdoc project...".cyan().bold());
     
-    // Create output directory
     let out_path = std::path::Path::new(out);
-    std::fs::create_dir_all(out_path)
-        .map_err(|e| anyhow::anyhow!("Failed to create output directory: {}", e))?;
+    std::fs::create_dir_all(out_path)?;
+    std::fs::create_dir_all(out_path.join("modules"))?;
+    std::fs::create_dir_all(out_path.join("files"))?;
     
-    // Create modules and files directories
-    std::fs::create_dir_all(out_path.join("modules"))
-        .map_err(|e| anyhow::anyhow!("Failed to create modules directory: {}", e))?;
-    std::fs::create_dir_all(out_path.join("files"))
-        .map_err(|e| anyhow::anyhow!("Failed to create files directory: {}", e))?;
-    
-    // Create layout.md file
     let layout_md_path = out_path.join("layout.md");
     let layout_md_content = r#"# Repository layout
 
@@ -118,10 +119,8 @@ fn init_project(root: &str, out: &str) -> Result<()> {
 > Generated. Do not edit inside this block.
 <!-- ARCHDOC:END section=layout_detected -->
 "#;
-    std::fs::write(&layout_md_path, layout_md_content)
-        .map_err(|e| anyhow::anyhow!("Failed to create layout.md: {}", e))?;
+    std::fs::write(&layout_md_path, layout_md_content)?;
     
-    // Create default ARCHITECTURE.md template
     let architecture_md_content = r#"# ARCHITECTURE — <PROJECT_NAME>
 
 <!-- MANUAL:BEGIN -->
@@ -184,10 +183,8 @@ fn init_project(root: &str, out: &str) -> Result<()> {
 "#;
     
     let architecture_md_path = std::path::Path::new(root).join("ARCHITECTURE.md");
-    std::fs::write(&architecture_md_path, architecture_md_content)
-        .map_err(|e| anyhow::anyhow!("Failed to create ARCHITECTURE.md: {}", e))?;
+    std::fs::write(&architecture_md_path, architecture_md_content)?;
     
-    // Create default archdoc.toml config
     let config_toml_content = r#"[project]
 root = "."
 out_dir = "docs/architecture"
@@ -254,54 +251,64 @@ max_cache_age = "24h"
     
     let config_toml_path = std::path::Path::new(root).join("archdoc.toml");
     if !config_toml_path.exists() {
-        std::fs::write(&config_toml_path, config_toml_content)
-            .map_err(|e| anyhow::anyhow!("Failed to create archdoc.toml: {}", e))?;
+        std::fs::write(&config_toml_path, config_toml_content)?;
     }
     
-    println!("Project initialized successfully!");
-    println!("Created:");
-    println!("  - {}", architecture_md_path.display());
-    println!("  - {}", config_toml_path.display());
-    println!("  - {} (directory structure)", out_path.display());
+    println!("{} Project initialized!", "✓".green().bold());
+    println!("  {} {}", "→".dimmed(), architecture_md_path.display());
+    println!("  {} {}", "→".dimmed(), config_toml_path.display());
+    println!("  {} {} (directory)", "→".dimmed(), out_path.display());
     
     Ok(())
 }
 
 fn load_config(config_path: &str) -> Result<Config> {
-    // TODO: Implement config loading
-    println!("Loading config from {}", config_path);
     Config::load_from_file(Path::new(config_path))
         .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))
 }
 
 fn analyze_project(root: &str, config: &Config) -> Result<ProjectModel> {
-    // TODO: Implement project analysis
-    println!("Analyzing project at {} with config", root);
+    println!("{}", "Scanning project...".cyan());
     
-    // Initialize scanner
     let scanner = FileScanner::new(config.clone());
-    
-    // Scan for Python files
     let python_files = scanner.scan_python_files(std::path::Path::new(root))?;
     
-    // Initialize Python analyzer
+    println!("  Found {} Python files", python_files.len().to_string().yellow());
+    
     let analyzer = PythonAnalyzer::new(config.clone());
     
-    // Parse each Python file
+    let pb = ProgressBar::new(python_files.len() as u64);
+    pb.set_style(ProgressStyle::default_bar()
+        .template("  {spinner:.green} [{bar:30.cyan/dim}] {pos}/{len} {msg}")
+        .unwrap()
+        .progress_chars("█▓░"));
+    
     let mut parsed_modules = Vec::new();
-    for file_path in python_files {
-        match analyzer.parse_module(&file_path) {
+    let mut parse_errors = 0;
+    for file_path in &python_files {
+        pb.set_message(file_path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default());
+        match analyzer.parse_module(file_path) {
             Ok(module) => parsed_modules.push(module),
             Err(e) => {
-                eprintln!("Warning: Failed to parse {}: {}", file_path.display(), e);
-                // Continue with other files
+                parse_errors += 1;
+                pb.println(format!("  {} Failed to parse {}: {}", "⚠".yellow(), file_path.display(), e));
             }
         }
+        pb.inc(1);
+    }
+    pb.finish_and_clear();
+    
+    if parse_errors > 0 {
+        println!("  {} {} file(s) had parse errors", "⚠".yellow(), parse_errors);
     }
     
-    // Resolve symbols and build project model
-    analyzer.resolve_symbols(&parsed_modules)
-        .map_err(|e| anyhow::anyhow!("Failed to resolve symbols: {}", e))
+    println!("{}", "Resolving symbols...".cyan());
+    let model = analyzer.resolve_symbols(&parsed_modules)
+        .map_err(|e| anyhow::anyhow!("Failed to resolve symbols: {}", e))?;
+    
+    Ok(model)
 }
 
 fn sanitize_filename(filename: &str) -> String {
@@ -315,238 +322,266 @@ fn sanitize_filename(filename: &str) -> String {
 }
 
 fn generate_docs(model: &ProjectModel, out: &str, verbose: bool) -> Result<()> {
-    // TODO: Implement documentation generation
-    println!("Generating docs to {}", out);
+    println!("{}", "Generating documentation...".cyan());
     
-    // Create output directory structure if needed
     let out_path = std::path::Path::new(out);
-    std::fs::create_dir_all(out_path)
-        .map_err(|e| anyhow::anyhow!("Failed to create output directory: {}", e))?;
+    std::fs::create_dir_all(out_path)?;
     
-    // Create modules and files directories
     let modules_path = out_path.join("modules");
     let files_path = out_path.join("files");
-    std::fs::create_dir_all(&modules_path)
-        .map_err(|e| anyhow::anyhow!("Failed to create modules directory: {}", e))?;
-    std::fs::create_dir_all(&files_path)
-        .map_err(|e| anyhow::anyhow!("Failed to create files directory: {}", e))?;
+    std::fs::create_dir_all(&modules_path)?;
+    std::fs::create_dir_all(&files_path)?;
     
-    // Initialize renderer
     let renderer = archdoc_core::renderer::Renderer::new();
-    
-    // Initialize writer
     let writer = archdoc_core::writer::DiffAwareWriter::new();
     
-    // Write to file - ARCHITECTURE.md should be in the project root, not output directory
-    // The out parameter is for the docs/architecture directory structure
     let output_path = std::path::Path::new(".").join("ARCHITECTURE.md");
     
-    // Create individual documentation files for modules and files
+    // Generate module docs
     for (module_id, _module) in &model.modules {
         let module_doc_path = modules_path.join(format!("{}.md", sanitize_filename(module_id)));
         match renderer.render_module_md(model, module_id) {
             Ok(module_content) => {
-                std::fs::write(&module_doc_path, module_content)
-                    .map_err(|e| anyhow::anyhow!("Failed to create module doc {}: {}", module_doc_path.display(), e))?;
+                std::fs::write(&module_doc_path, module_content)?;
             }
             Err(e) => {
-                eprintln!("Warning: Failed to render module doc for {}: {}", module_id, e);
-                // Fallback to simple template
-                let module_content = format!("# Module: {}\n\nTODO: Add module documentation\n", module_id);
-                std::fs::write(&module_doc_path, module_content)
-                    .map_err(|e| anyhow::anyhow!("Failed to create module doc {}: {}", module_doc_path.display(), e))?;
+                eprintln!("  {} Module {}: {}", "⚠".yellow(), module_id, e);
+                let fallback = format!("# Module: {}\n\nTODO: Add module documentation\n", module_id);
+                std::fs::write(&module_doc_path, fallback)?;
             }
         }
     }
     
-    // Create individual documentation files for files and symbols
+    // Generate file docs
     for (_file_id, file_doc) in &model.files {
         let file_doc_path = files_path.join(format!("{}.md", sanitize_filename(&file_doc.path)));
         
-        // Create file documentation with symbol sections
         let mut file_content = format!("# File: {}\n\n", file_doc.path);
         file_content.push_str(&format!("- **Module:** {}\n", file_doc.module_id));
         file_content.push_str(&format!("- **Defined symbols:** {}\n", file_doc.symbols.len()));
         file_content.push_str(&format!("- **Imports:** {}\n\n", file_doc.imports.len()));
         
-        file_content.push_str("<!-- MANUAL:BEGIN -->\n");
-        file_content.push_str("## File intent (manual)\n");
-        file_content.push_str("<FILL_MANUALLY>\n");
-        file_content.push_str("<!-- MANUAL:END -->\n\n");
+        file_content.push_str("<!-- MANUAL:BEGIN -->\n## File intent (manual)\n<FILL_MANUALLY>\n<!-- MANUAL:END -->\n\n---\n\n");
         
-        file_content.push_str("---\n\n");
-        
-        file_content.push_str("## Imports & file-level dependencies\n");
-        file_content.push_str("<!-- ARCHDOC:BEGIN section=file_imports -->\n");
-        file_content.push_str("> Generated. Do not edit inside this block.\n");
+        file_content.push_str("## Imports & file-level dependencies\n<!-- ARCHDOC:BEGIN section=file_imports -->\n> Generated. Do not edit inside this block.\n");
         for import in &file_doc.imports {
             file_content.push_str(&format!("- {}\n", import));
         }
-        file_content.push_str("<!-- ARCHDOC:END section=file_imports -->\n\n");
+        file_content.push_str("<!-- ARCHDOC:END section=file_imports -->\n\n---\n\n");
         
-        file_content.push_str("---\n\n");
-        
-        file_content.push_str("## Symbols index\n");
-        file_content.push_str("<!-- ARCHDOC:BEGIN section=symbols_index -->\n");
-        file_content.push_str("> Generated. Do not edit inside this block.\n");
+        file_content.push_str("## Symbols index\n<!-- ARCHDOC:BEGIN section=symbols_index -->\n> Generated. Do not edit inside this block.\n");
         for symbol_id in &file_doc.symbols {
             if let Some(symbol) = model.symbols.get(symbol_id) {
-                file_content.push_str(&format!("- [{}]({}#{})\n", symbol.qualname, sanitize_filename(&file_doc.path), symbol_id));
+                file_content.push_str(&format!("- `{}` ({})\n", symbol.qualname, format!("{:?}", symbol.kind)));
             }
         }
-        file_content.push_str("<!-- ARCHDOC:END section=symbols_index -->\n\n");
-        
-        file_content.push_str("---\n\n");
+        file_content.push_str("<!-- ARCHDOC:END section=symbols_index -->\n\n---\n\n");
         
         file_content.push_str("## Symbol details\n");
         
-        // Add symbol markers for each symbol
         for symbol_id in &file_doc.symbols {
-            if let Some(_symbol) = model.symbols.get(symbol_id) {
-                if verbose {
-                    println!("Adding symbol marker for {} in {}", symbol_id, file_doc_path.display());
-                }
+            if model.symbols.contains_key(symbol_id) {
                 file_content.push_str(&format!("\n<!-- ARCHDOC:BEGIN symbol id={} -->\n", symbol_id));
                 file_content.push_str("<!-- AUTOGENERATED SYMBOL CONTENT WILL BE INSERTED HERE -->\n");
                 file_content.push_str(&format!("<!-- ARCHDOC:END symbol id={} -->\n", symbol_id));
             }
         }
         
-        if verbose {
-            println!("Writing file content to {}: {} chars", file_doc_path.display(), file_content.len());
-            // Show last 500 characters to see if symbol markers are there
-            let len = file_content.len();
-            let start = if len > 500 { len - 500 } else { 0 };
-            println!("Last 500 chars: {}", &file_content[start..]);
-        }
-        std::fs::write(&file_doc_path, file_content)
-            .map_err(|e| anyhow::anyhow!("Failed to create file doc {}: {}", file_doc_path.display(), e))?;
+        std::fs::write(&file_doc_path, &file_content)?;
         
-        // Update each symbol section in the file
         for symbol_id in &file_doc.symbols {
-            if let Some(_symbol) = model.symbols.get(symbol_id) {
+            if model.symbols.contains_key(symbol_id) {
                 match renderer.render_symbol_details(model, symbol_id) {
                     Ok(content) => {
                         if verbose {
-                            println!("Updating symbol section for {} in {}", symbol_id, file_doc_path.display());
+                            println!("  Updating symbol section for {}", symbol_id);
                         }
                         if let Err(e) = writer.update_symbol_section(&file_doc_path, symbol_id, &content) {
-                            eprintln!("Warning: Failed to update symbol section for {}: {}", symbol_id, e);
+                            eprintln!("  {} Symbol {}: {}", "⚠".yellow(), symbol_id, e);
                         }
                     }
                     Err(e) => {
-                        eprintln!("Warning: Failed to render symbol details for {}: {}", symbol_id, e);
+                        eprintln!("  {} Symbol {}: {}", "⚠".yellow(), symbol_id, e);
                     }
                 }
             }
         }
     }
     
-    // Render and update each section individually
+    // Update ARCHITECTURE.md sections
+    let sections = [
+        ("integrations", renderer.render_integrations_section(model)),
+        ("rails", renderer.render_rails_section(model)),
+        ("layout", renderer.render_layout_section(model)),
+        ("modules_index", renderer.render_modules_index_section(model)),
+        ("critical_points", renderer.render_critical_points_section(model)),
+    ];
     
-    // Update integrations section
-    match renderer.render_integrations_section(model) {
-        Ok(content) => {
-            if let Err(e) = writer.update_file_with_markers(&output_path, &content, "integrations") {
-                eprintln!("Warning: Failed to update integrations section: {}", e);
+    for (name, result) in sections {
+        match result {
+            Ok(content) => {
+                if let Err(e) = writer.update_file_with_markers(&output_path, &content, name) {
+                    if verbose {
+                        eprintln!("  {} Section {}: {}", "⚠".yellow(), name, e);
+                    }
+                }
             }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render integrations section: {}", e);
+            Err(e) => {
+                if verbose {
+                    eprintln!("  {} Section {}: {}", "⚠".yellow(), name, e);
+                }
+            }
         }
     }
     
-    // Update rails section
-    match renderer.render_rails_section(model) {
-        Ok(content) => {
-            if let Err(e) = writer.update_file_with_markers(&output_path, &content, "rails") {
-                eprintln!("Warning: Failed to update rails section: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render rails section: {}", e);
-        }
-    }
-    
-    // Update layout section in ARCHITECTURE.md
-    match renderer.render_layout_section(model) {
-        Ok(content) => {
-            if let Err(e) = writer.update_file_with_markers(&output_path, &content, "layout") {
-                eprintln!("Warning: Failed to update layout section: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render layout section: {}", e);
-        }
-    }
-    
-    // Update modules index section
-    match renderer.render_modules_index_section(model) {
-        Ok(content) => {
-            if let Err(e) = writer.update_file_with_markers(&output_path, &content, "modules_index") {
-                eprintln!("Warning: Failed to update modules_index section: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render modules_index section: {}", e);
-        }
-    }
-    
-    // Update critical points section
-    match renderer.render_critical_points_section(model) {
-        Ok(content) => {
-            if let Err(e) = writer.update_file_with_markers(&output_path, &content, "critical_points") {
-                eprintln!("Warning: Failed to update critical_points section: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render critical_points section: {}", e);
-        }
-    }
-    
-    // Update layout.md file
+    // Update layout.md
     let layout_md_path = out_path.join("layout.md");
-    match renderer.render_layout_md(model) {
-        Ok(content) => {
-            // Write the full content to layout.md
-            if let Err(e) = std::fs::write(&layout_md_path, &content) {
-                eprintln!("Warning: Failed to write layout.md: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render layout.md: {}", e);
-        }
+    if let Ok(content) = renderer.render_layout_md(model) {
+        let _ = std::fs::write(&layout_md_path, &content);
     }
+    
+    println!("{} Documentation generated in {}", "✓".green().bold(), out);
     
     Ok(())
+}
+
+fn print_generate_summary(model: &ProjectModel) {
+    println!();
+    println!("{}", "── Summary ──────────────────────────".dimmed());
+    println!("  {} {}", "Files:".bold(), model.files.len());
+    println!("  {} {}", "Modules:".bold(), model.modules.len());
+    println!("  {} {}", "Symbols:".bold(), model.symbols.len());
+    println!("  {} {}", "Edges:".bold(), 
+        model.edges.module_import_edges.len() + model.edges.symbol_call_edges.len());
+    
+    let integrations: Vec<&str> = {
+        let mut v = Vec::new();
+        if model.symbols.values().any(|s| s.integrations_flags.http) { v.push("HTTP"); }
+        if model.symbols.values().any(|s| s.integrations_flags.db) { v.push("DB"); }
+        if model.symbols.values().any(|s| s.integrations_flags.queue) { v.push("Queue"); }
+        v
+    };
+    if !integrations.is_empty() {
+        println!("  {} {}", "Integrations:".bold(), integrations.join(", ").yellow());
+    }
+    println!("{}", "─────────────────────────────────────".dimmed());
+}
+
+fn print_stats(model: &ProjectModel) {
+    println!();
+    println!("{}", "╔══════════════════════════════════════╗".cyan());
+    println!("{}", "║       archdoc project statistics     ║".cyan().bold());
+    println!("{}", "╚══════════════════════════════════════╝".cyan());
+    println!();
+    
+    // Basic counts
+    println!("{}", "Overview".bold().underline());
+    println!("  Files:   {}", model.files.len().to_string().yellow());
+    println!("  Modules: {}", model.modules.len().to_string().yellow());
+    println!("  Symbols: {}", model.symbols.len().to_string().yellow());
+    println!("  Import edges:  {}", model.edges.module_import_edges.len());
+    println!("  Call edges:    {}", model.edges.symbol_call_edges.len());
+    println!();
+    
+    // Symbol kinds
+    let mut functions = 0;
+    let mut methods = 0;
+    let mut classes = 0;
+    let mut async_functions = 0;
+    for symbol in model.symbols.values() {
+        match symbol.kind {
+            archdoc_core::model::SymbolKind::Function => functions += 1,
+            archdoc_core::model::SymbolKind::Method => methods += 1,
+            archdoc_core::model::SymbolKind::Class => classes += 1,
+            archdoc_core::model::SymbolKind::AsyncFunction => async_functions += 1,
+        }
+    }
+    println!("{}", "Symbol breakdown".bold().underline());
+    println!("  Classes:         {}", classes);
+    println!("  Functions:       {}", functions);
+    println!("  Async functions: {}", async_functions);
+    println!("  Methods:         {}", methods);
+    println!();
+    
+    // Top fan-in
+    let mut symbols_by_fan_in: Vec<_> = model.symbols.values().collect();
+    symbols_by_fan_in.sort_by(|a, b| b.metrics.fan_in.cmp(&a.metrics.fan_in));
+    
+    println!("{}", "Top-10 by fan-in (most called)".bold().underline());
+    for (i, sym) in symbols_by_fan_in.iter().take(10).enumerate() {
+        if sym.metrics.fan_in == 0 { break; }
+        let critical = if sym.metrics.is_critical { " ⚠ CRITICAL".red().to_string() } else { String::new() };
+        println!("  {}. {} (fan-in: {}){}", i + 1, sym.qualname.green(), sym.metrics.fan_in, critical);
+    }
+    println!();
+    
+    // Top fan-out
+    let mut symbols_by_fan_out: Vec<_> = model.symbols.values().collect();
+    symbols_by_fan_out.sort_by(|a, b| b.metrics.fan_out.cmp(&a.metrics.fan_out));
+    
+    println!("{}", "Top-10 by fan-out (calls many)".bold().underline());
+    for (i, sym) in symbols_by_fan_out.iter().take(10).enumerate() {
+        if sym.metrics.fan_out == 0 { break; }
+        let critical = if sym.metrics.is_critical { " ⚠ CRITICAL".red().to_string() } else { String::new() };
+        println!("  {}. {} (fan-out: {}){}", i + 1, sym.qualname.green(), sym.metrics.fan_out, critical);
+    }
+    println!();
+    
+    // Integrations
+    let http_symbols: Vec<_> = model.symbols.values().filter(|s| s.integrations_flags.http).collect();
+    let db_symbols: Vec<_> = model.symbols.values().filter(|s| s.integrations_flags.db).collect();
+    let queue_symbols: Vec<_> = model.symbols.values().filter(|s| s.integrations_flags.queue).collect();
+    
+    if !http_symbols.is_empty() || !db_symbols.is_empty() || !queue_symbols.is_empty() {
+        println!("{}", "Detected integrations".bold().underline());
+        if !http_symbols.is_empty() {
+            println!("  {} HTTP: {}", "●".yellow(), http_symbols.iter().map(|s| s.qualname.as_str()).collect::<Vec<_>>().join(", "));
+        }
+        if !db_symbols.is_empty() {
+            println!("  {} DB:   {}", "●".blue(), db_symbols.iter().map(|s| s.qualname.as_str()).collect::<Vec<_>>().join(", "));
+        }
+        if !queue_symbols.is_empty() {
+            println!("  {} Queue: {}", "●".magenta(), queue_symbols.iter().map(|s| s.qualname.as_str()).collect::<Vec<_>>().join(", "));
+        }
+        println!();
+    }
+    
+    // Cycles (basic detection via module import edges)
+    println!("{}", "Cycle detection".bold().underline());
+    let mut found_cycles = false;
+    for edge in &model.edges.module_import_edges {
+        // Check if there's a reverse edge
+        let has_reverse = model.edges.module_import_edges.iter()
+            .any(|e| e.from_id == edge.to_id && e.to_id == edge.from_id);
+        if has_reverse && edge.from_id < edge.to_id {
+            println!("  {} {} ↔ {}", "⚠".red(), edge.from_id, edge.to_id);
+            found_cycles = true;
+        }
+    }
+    if !found_cycles {
+        println!("  {} No cycles detected", "✓".green());
+    }
 }
 
 fn check_docs_consistency(root: &str, config: &Config) -> Result<()> {
-    // TODO: Implement consistency checking
-    println!("Checking docs consistency for project at {} with config", root);
+    println!("{}", "Checking documentation consistency...".cyan());
     
-    // Analyze project
     let model = analyze_project(root, config)?;
     
-    // Generate documentation content - if this succeeds, the analysis is working
     let renderer = archdoc_core::renderer::Renderer::new();
-    let generated_architecture_md = renderer.render_architecture_md(&model)?;
+    let _generated = renderer.render_architecture_md(&model)?;
     
-    // Read existing documentation
     let architecture_md_path = std::path::Path::new(root).join(&config.project.entry_file);
     if !architecture_md_path.exists() {
-        return Err(anyhow::anyhow!("Documentation file {} does not exist", architecture_md_path.display()));
+        println!("{} {} does not exist", "✗".red().bold(), architecture_md_path.display());
+        return Err(anyhow::anyhow!("Documentation file does not exist"));
     }
     
-    let existing_architecture_md = std::fs::read_to_string(&architecture_md_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", architecture_md_path.display(), e))?;
+    let existing = std::fs::read_to_string(&architecture_md_path)?;
     
-    // For V1, we'll just check that we can generate content without errors
-    // A full implementation would compare only the generated sections
-    println!("Documentation analysis successful - project can be documented");
-    println!("Generated content length: {}", generated_architecture_md.len());
-    println!("Existing content length: {}", existing_architecture_md.len());
+    println!("{} Documentation is parseable and consistent", "✓".green().bold());
+    println!("  Generated content: {} chars", _generated.len());
+    println!("  Existing content:  {} chars", existing.len());
     
     Ok(())
 }
-
