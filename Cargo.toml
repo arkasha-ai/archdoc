@@ -1,0 +1,3 @@
+[workspace]
+members = ["archdoc-cli", "archdoc-core"]
+resolver = "3"
