@@ -360,7 +360,7 @@ fn generate_docs(model: &ProjectModel, out: &str, verbose: bool) -> Result<()> {
     }
     
     // Create individual documentation files for files and symbols
-    for (file_id, file_doc) in &model.files {
+    for (_file_id, file_doc) in &model.files {
         let file_doc_path = files_path.join(format!("{}.md", sanitize_filename(&file_doc.path)));
         
         // Create file documentation with symbol sections
