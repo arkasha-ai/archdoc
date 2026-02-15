@@ -7,6 +7,7 @@ use std::path::Path;
 use crate::errors::ArchDocError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct Config {
     #[serde(default)]
     pub project: ProjectConfig,
@@ -30,22 +31,6 @@ pub struct Config {
     pub caching: CachingConfig,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            project: ProjectConfig::default(),
-            scan: ScanConfig::default(),
-            python: PythonConfig::default(),
-            analysis: AnalysisConfig::default(),
-            output: OutputConfig::default(),
-            diff: DiffConfig::default(),
-            thresholds: ThresholdsConfig::default(),
-            rendering: RenderingConfig::default(),
-            logging: LoggingConfig::default(),
-            caching: CachingConfig::default(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {

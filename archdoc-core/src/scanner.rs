@@ -41,8 +41,7 @@ impl FileScanner {
             .into_iter() {
             
             let entry = entry.map_err(|e| {
-                ArchDocError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                ArchDocError::Io(std::io::Error::other(
                     format!("Failed to read directory entry: {}", e)
                 ))
             })?;
@@ -51,11 +50,7 @@ impl FileScanner {
             
             // Skip excluded paths
             if self.is_excluded(path) {
-                if path.is_dir() {
-                    continue;
-                } else {
-                    continue;
-                }
+                continue;
             }
             
             // Include Python files

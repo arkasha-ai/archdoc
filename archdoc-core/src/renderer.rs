@@ -20,6 +20,12 @@ pub struct Renderer {
     templates: Handlebars<'static>,
 }
 
+impl Default for Renderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Renderer {
     pub fn new() -> Self {
         let mut handlebars = Handlebars::new();
@@ -393,7 +399,7 @@ impl Renderer {
         // Collect layout information from files
         let mut layout_items = Vec::new();
         
-        for (_file_id, file_doc) in &model.files {
+        for file_doc in model.files.values() {
             layout_items.push(serde_json::json!({
                 "path": file_doc.path,
                 "purpose": "Source file",
@@ -525,7 +531,7 @@ impl Renderer {
         // Collect layout information from files
         let mut layout_items = Vec::new();
         
-        for (_file_id, file_doc) in &model.files {
+        for file_doc in model.files.values() {
             layout_items.push(serde_json::json!({
                 "path": file_doc.path,
                 "purpose": "Source file",

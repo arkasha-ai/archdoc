@@ -13,14 +13,14 @@ use rustpython_parser::{ast, Parse};
 use rustpython_ast::{Stmt, Expr, Ranged};
 
 pub struct PythonAnalyzer {
-    _config: Config,
+    config: Config,
     cache_manager: CacheManager,
 }
 
 impl PythonAnalyzer {
     pub fn new(config: Config) -> Self {
         let cache_manager = CacheManager::new(config.clone());
-        Self { _config: config, cache_manager }
+        Self { config, cache_manager }
     }
     
     pub fn parse_module(&self, file_path: &Path) -> Result<ParsedModule, ArchDocError> {
@@ -67,7 +67,7 @@ impl PythonAnalyzer {
         imports: &mut Vec<Import>,
         symbols: &mut Vec<Symbol>,
         calls: &mut Vec<Call>,
-        depth: usize,
+        _depth: usize,
     ) {
         match stmt {
             Stmt::Import(import_stmt) => {
@@ -104,7 +104,7 @@ impl PythonAnalyzer {
                 };
                 
                 let signature = self.build_function_signature(&func_def.name, &func_def.args);
-                let integrations_flags = self.detect_integrations(&func_def.body, &self._config);
+                let integrations_flags = self.detect_integrations(&func_def.body, &self.config);
                 let docstring = self.extract_docstring(&func_def.body);
                 
                 let symbol = Symbol {
@@ -130,7 +130,7 @@ impl PythonAnalyzer {
                 symbols.push(symbol);
                 
                 for body_stmt in &func_def.body {
-                    self.extract_from_statement(body_stmt, parent_class, imports, symbols, calls, depth + 1);
+                    self.extract_from_statement(body_stmt, parent_class, imports, symbols, calls, _depth + 1);
                 }
                 // Extract calls from body expressions recursively
                 self.extract_calls_from_body(&func_def.body, Some(&qualname), calls);
@@ -143,7 +143,7 @@ impl PythonAnalyzer {
                 };
                 
                 let signature = format!("async {}", self.build_function_signature(&func_def.name, &func_def.args));
-                let integrations_flags = self.detect_integrations(&func_def.body, &self._config);
+                let integrations_flags = self.detect_integrations(&func_def.body, &self.config);
                 let docstring = self.extract_docstring(&func_def.body);
                 
                 let symbol = Symbol {
@@ -169,12 +169,12 @@ impl PythonAnalyzer {
                 symbols.push(symbol);
                 
                 for body_stmt in &func_def.body {
-                    self.extract_from_statement(body_stmt, parent_class, imports, symbols, calls, depth + 1);
+                    self.extract_from_statement(body_stmt, parent_class, imports, symbols, calls, _depth + 1);
                 }
                 self.extract_calls_from_body(&func_def.body, Some(&qualname), calls);
             }
             Stmt::ClassDef(class_def) => {
-                let integrations_flags = self.detect_integrations(&class_def.body, &self._config);
+                let integrations_flags = self.detect_integrations(&class_def.body, &self.config);
                 let docstring = self.extract_docstring(&class_def.body);
                 
                 let symbol = Symbol {
@@ -201,7 +201,7 @@ impl PythonAnalyzer {
                 
                 // Process class body with class name as parent
                 for body_stmt in &class_def.body {
-                    self.extract_from_statement(body_stmt, Some(&class_def.name), imports, symbols, calls, depth + 1);
+                    self.extract_from_statement(body_stmt, Some(&class_def.name), imports, symbols, calls, _depth + 1);
                 }
             }
             Stmt::Expr(expr_stmt) => {
@@ -346,10 +346,10 @@ impl PythonAnalyzer {
     }
     
     fn extract_docstring(&self, body: &[Stmt]) -> Option<String> {
-        if let Some(first_stmt) = body.first() {
-            if let Stmt::Expr(expr_stmt) = first_stmt {
-                if let Expr::Constant(constant_expr) = &*expr_stmt.value {
-                    if let Some(docstring) = constant_expr.value.as_str() {
+        if let Some(first_stmt) = body.first()
+            && let Stmt::Expr(expr_stmt) = first_stmt
+                && let Expr::Constant(constant_expr) = &*expr_stmt.value
+                    && let Some(docstring) = constant_expr.value.as_str() {
                         // Return full docstring, trimmed
                         let trimmed = docstring.trim();
                         if trimmed.is_empty() {
@@ -357,9 +357,6 @@ impl PythonAnalyzer {
                         }
                         return Some(trimmed.to_string());
                     }
-                }
-            }
-        }
         None
     }
     
@@ -446,10 +443,8 @@ impl PythonAnalyzer {
                 self.extract_from_expression(&if_exp.orelse, current_symbol, calls);
             }
             Expr::Dict(dict_expr) => {
-                for key in &dict_expr.keys {
-                    if let Some(k) = key {
-                        self.extract_from_expression(k, current_symbol, calls);
-                    }
+                for k in dict_expr.keys.iter().flatten() {
+                    self.extract_from_expression(k, current_symbol, calls);
                 }
                 for value in &dict_expr.values {
                     self.extract_from_expression(value, current_symbol, calls);
@@ -522,6 +517,55 @@ impl PythonAnalyzer {
         }
     }
     
+    /// Compute Python module path from file path using src_roots from config.
+    /// E.g. `./src/core.py` with src_root `src` → `core`
+    /// `./src/__init__.py` with src_root `src` → `src` (package)
+    /// `back-end/services/chat/agent.py` with src_root `.` → `back-end.services.chat.agent`
+    fn compute_module_path(&self, file_path: &Path) -> String {
+        let path_str = file_path.to_string_lossy().to_string();
+        // Normalize: strip leading ./
+        let normalized = path_str.strip_prefix("./").unwrap_or(&path_str);
+        let path = std::path::Path::new(normalized);
+
+        for src_root in &self.config.python.src_roots {
+            let root = if src_root == "." {
+                std::path::Path::new("")
+            } else {
+                std::path::Path::new(src_root)
+            };
+
+            let relative = if root == std::path::Path::new("") {
+                Some(path.to_path_buf())
+            } else {
+                path.strip_prefix(root).ok().map(|p| p.to_path_buf())
+            };
+
+            if let Some(rel) = relative {
+                let rel_str = rel.to_string_lossy().to_string();
+                // Check if it's an __init__.py → use the parent directory name as module
+                if rel.file_name().map(|f| f == "__init__.py").unwrap_or(false)
+                    && let Some(parent) = rel.parent() {
+                        if parent == std::path::Path::new("") {
+                            // __init__.py at src_root level → use src_root as module name
+                            if src_root == "." {
+                                return "__init__".to_string();
+                            }
+                            return src_root.replace('/', ".");
+                        }
+                        return parent.to_string_lossy().replace(['/', '\\'], ".");
+                    }
+
+                // Strip .py extension and convert path separators to dots
+                let without_ext = rel_str.strip_suffix(".py").unwrap_or(&rel_str);
+                let module_path = without_ext.replace(['/', '\\'], ".");
+                return module_path;
+            }
+        }
+
+        // Fallback: use file path as-is
+        normalized.to_string()
+    }
+
     pub fn resolve_symbols(&self, modules: &[ParsedModule]) -> Result<ProjectModel, ArchDocError> {
         let mut project_model = ProjectModel::new();
         
@@ -537,7 +581,7 @@ impl PythonAnalyzer {
         }
         
         for parsed_module in modules {
-            let module_id = parsed_module.module_path.clone();
+            let module_id = self.compute_module_path(&parsed_module.path);
             let file_id = parsed_module.path.to_string_lossy().to_string();
             
             let file_doc = FileDoc {
@@ -625,7 +669,7 @@ impl PythonAnalyzer {
     
     fn build_dependency_graphs(&self, project_model: &mut ProjectModel, parsed_modules: &[ParsedModule]) -> Result<(), ArchDocError> {
         for parsed_module in parsed_modules {
-            let from_module_id = parsed_module.module_path.clone();
+            let from_module_id = self.compute_module_path(&parsed_module.path);
             
             for import in &parsed_module.imports {
                 let to_module_id = import.module_name.clone();

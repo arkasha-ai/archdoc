@@ -53,7 +53,7 @@ impl CacheManager {
         
         // Read cache file
         let content = fs::read_to_string(&cache_file)
-            .map_err(|e| ArchDocError::Io(e))?;
+            .map_err(ArchDocError::Io)?;
         
         let cache_entry: CacheEntry = serde_json::from_str(&content)
             .map_err(|e| ArchDocError::AnalysisError(format!("Failed to deserialize cache entry: {}", e)))?;
@@ -73,10 +73,10 @@ impl CacheManager {
         
         // Check if source file has been modified since caching
         let metadata = fs::metadata(file_path)
-            .map_err(|e| ArchDocError::Io(e))?;
+            .map_err(ArchDocError::Io)?;
         
         let modified_time = metadata.modified()
-            .map_err(|e| ArchDocError::Io(e))?;
+            .map_err(ArchDocError::Io)?;
         
         let modified_time: DateTime<Utc> = modified_time.into();
         
@@ -100,10 +100,10 @@ impl CacheManager {
         
         // Get file modification time
         let metadata = fs::metadata(file_path)
-            .map_err(|e| ArchDocError::Io(e))?;
+            .map_err(ArchDocError::Io)?;
         
         let modified_time = metadata.modified()
-            .map_err(|e| ArchDocError::Io(e))?;
+            .map_err(ArchDocError::Io)?;
         
         let modified_time: DateTime<Utc> = modified_time.into();
         
@@ -117,7 +117,7 @@ impl CacheManager {
             .map_err(|e| ArchDocError::AnalysisError(format!("Failed to serialize cache entry: {}", e)))?;
         
         fs::write(&cache_file, content)
-            .map_err(|e| ArchDocError::Io(e))
+            .map_err(ArchDocError::Io)
     }
     
     /// Generate cache key for a file path
@@ -156,11 +156,11 @@ impl CacheManager {
     pub fn clear_cache(&self) -> Result<(), ArchDocError> {
         if Path::new(&self.cache_dir).exists() {
             fs::remove_dir_all(&self.cache_dir)
-                .map_err(|e| ArchDocError::Io(e))?;
+                .map_err(ArchDocError::Io)?;
             
             // Recreate cache directory
             fs::create_dir_all(&self.cache_dir)
-                .map_err(|e| ArchDocError::Io(e))?;
+                .map_err(ArchDocError::Io)?;
         }
         
         Ok(())
