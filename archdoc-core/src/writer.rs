@@ -26,6 +26,12 @@ pub struct DiffAwareWriter {
     // Configuration
 }
 
+impl Default for DiffAwareWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiffAwareWriter {
     pub fn new() -> Self {
         Self {}
@@ -40,13 +46,13 @@ impl DiffAwareWriter {
         // Read existing file
         let existing_content = if file_path.exists() {
             fs::read_to_string(file_path)
-                .map_err(|e| ArchDocError::Io(e))?
+                .map_err(ArchDocError::Io)?
         } else {
             // Create new file with template
             let template_content = self.create_template_file(file_path, section_name)?;
             // Write template to file
             fs::write(file_path, &template_content)
-                .map_err(|e| ArchDocError::Io(e))?;
+                .map_err(ArchDocError::Io)?;
             template_content
         };
         
@@ -68,12 +74,12 @@ impl DiffAwareWriter {
             if content_changed {
                 let updated_content = self.update_timestamp(new_content)?;
                 fs::write(file_path, updated_content)
-                    .map_err(|e| ArchDocError::Io(e))?;
+                    .map_err(ArchDocError::Io)?;
             } else {
                 // Content hasn't changed, but we might still need to update timestamp
                 // TODO: Implement timestamp update logic based on config
                 fs::write(file_path, new_content)
-                    .map_err(|e| ArchDocError::Io(e))?;
+                    .map_err(ArchDocError::Io)?;
             }
         }
         
@@ -89,12 +95,12 @@ impl DiffAwareWriter {
         // Read existing file
         let existing_content = if file_path.exists() {
             fs::read_to_string(file_path)
-                .map_err(|e| ArchDocError::Io(e))?
+                .map_err(ArchDocError::Io)?
         } else {
             // If file doesn't exist, create it with a basic template
             let template_content = self.create_template_file(file_path, "symbol")?;
             fs::write(file_path, &template_content)
-                .map_err(|e| ArchDocError::Io(e))?;
+                .map_err(ArchDocError::Io)?;
             template_content
         };
         
@@ -116,12 +122,12 @@ impl DiffAwareWriter {
             if content_changed {
                 let updated_content = self.update_timestamp(new_content)?;
                 fs::write(file_path, updated_content)
-                    .map_err(|e| ArchDocError::Io(e))?;
+                    .map_err(ArchDocError::Io)?;
             } else {
                 // Content hasn't changed, but we might still need to update timestamp
                 // TODO: Implement timestamp update logic based on config
                 fs::write(file_path, new_content)
-                    .map_err(|e| ArchDocError::Io(e))?;
+                    .map_err(ArchDocError::Io)?;
             }
         } else {
             eprintln!("Warning: No symbol marker found for {} in {}", symbol_id, file_path.display());

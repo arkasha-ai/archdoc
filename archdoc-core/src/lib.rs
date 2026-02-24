@@ -12,6 +12,7 @@ pub mod python_analyzer;
 pub mod renderer;
 pub mod writer;
 pub mod cache;
+pub mod cycle_detector;
 
 // Re-export commonly used types
 pub use errors::ArchDocError;

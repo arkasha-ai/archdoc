@@ -1,9 +1,9 @@
+mod commands;
+mod output;
+
 use clap::{Parser, Subcommand};
 use anyhow::Result;
-use archdoc_core::{Config, ProjectModel, scanner::FileScanner, python_analyzer::PythonAnalyzer};
-use std::path::Path;
 
-/// CLI interface for ArchDoc
 #[derive(Parser)]
 #[command(name = "archdoc")]
 #[command(about = "Generate architecture documentation for Python projects")]
@@ -11,7 +11,7 @@ use std::path::Path;
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
-    
+
     /// Verbose output
     #[arg(short, long, global = true)]
     verbose: bool,
@@ -21,37 +21,31 @@ pub struct Cli {
 enum Commands {
     /// Initialize archdoc in the project
     Init {
-        /// Project root directory
         #[arg(short, long, default_value = ".")]
         root: String,
-        
-        /// Output directory for documentation
         #[arg(short, long, default_value = "docs/architecture")]
         out: String,
     },
-    
     /// Generate or update documentation
     Generate {
-        /// Project root directory
         #[arg(short, long, default_value = ".")]
         root: String,
-        
-        /// Output directory for documentation
         #[arg(short, long, default_value = "docs/architecture")]
         out: String,
-        
-        /// Configuration file path
         #[arg(short, long, default_value = "archdoc.toml")]
         config: String,
     },
-    
     /// Check if documentation is up to date
     Check {
-        /// Project root directory
         #[arg(short, long, default_value = ".")]
         root: String,
-        
-        /// Configuration file path
+        #[arg(short, long, default_value = "archdoc.toml")]
+        config: String,
+    },
+    /// Show project statistics
+    Stats {
+        #[arg(short, long, default_value = ".")]
+        root: String,
         #[arg(short, long, default_value = "archdoc.toml")]
         config: String,
     },
@@ -59,494 +53,27 @@ enum Commands {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    
-    // Setup logging based on verbose flag
-    setup_logging(cli.verbose)?;
-    
+
     match &cli.command {
         Commands::Init { root, out } => {
-            init_project(root, out)?;
+            commands::init::init_project(root, out)?;
         }
         Commands::Generate { root, out, config } => {
-            let config = load_config(config)?;
-            let model = analyze_project(root, &config)?;
-            generate_docs(&model, out, cli.verbose)?;
+            let config = commands::generate::load_config(config)?;
+            let model = commands::generate::analyze_project(root, &config)?;
+            commands::generate::generate_docs(&model, out, cli.verbose)?;
+            output::print_generate_summary(&model);
         }
         Commands::Check { root, config } => {
-            let config = load_config(config)?;
-            check_docs_consistency(root, &config)?;
+            let config = commands::generate::load_config(config)?;
+            commands::check::check_docs_consistency(root, &config)?;
+        }
+        Commands::Stats { root, config } => {
+            let config = commands::generate::load_config(config)?;
+            let model = commands::generate::analyze_project(root, &config)?;
+            commands::stats::print_stats(&model);
         }
     }
-    
+
     Ok(())
 }
-
-fn setup_logging(verbose: bool) -> Result<()> {
-    // TODO: Implement logging setup
-    println!("Setting up logging with verbose={}", verbose);
-    Ok(())
-}
-
-fn init_project(root: &str, out: &str) -> Result<()> {
-    // TODO: Implement project initialization
-    println!("Initializing project at {} with output to {}", root, out);
-    
-    // Create output directory
-    let out_path = std::path::Path::new(out);
-    std::fs::create_dir_all(out_path)
-        .map_err(|e| anyhow::anyhow!("Failed to create output directory: {}", e))?;
-    
-    // Create modules and files directories
-    std::fs::create_dir_all(out_path.join("modules"))
-        .map_err(|e| anyhow::anyhow!("Failed to create modules directory: {}", e))?;
-    std::fs::create_dir_all(out_path.join("files"))
-        .map_err(|e| anyhow::anyhow!("Failed to create files directory: {}", e))?;
-    
-    // Create layout.md file
-    let layout_md_path = out_path.join("layout.md");
-    let layout_md_content = r#"# Repository layout
-
-<!-- MANUAL:BEGIN -->
-## Manual overrides
-- `src/app/` — <FILL_MANUALLY>
-<!-- MANUAL:END -->
-
----
-
-## Detected structure
-<!-- ARCHDOC:BEGIN section=layout_detected -->
-> Generated. Do not edit inside this block.
-<!-- ARCHDOC:END section=layout_detected -->
-"#;
-    std::fs::write(&layout_md_path, layout_md_content)
-        .map_err(|e| anyhow::anyhow!("Failed to create layout.md: {}", e))?;
-    
-    // Create default ARCHITECTURE.md template
-    let architecture_md_content = r#"# ARCHITECTURE — <PROJECT_NAME>
-
-<!-- MANUAL:BEGIN -->
-## Project summary
-**Name:** <PROJECT_NAME>
-**Description:** <FILL_MANUALLY: what this project does in 3–7 lines>
-
-## Key decisions (manual)
-- <FILL_MANUALLY>
-
-## Non-goals (manual)
-- <FILL_MANUALLY>
-<!-- MANUAL:END -->
-
----
-
-## Document metadata
-- **Created:** <AUTO_ON_INIT: YYYY-MM-DD>
-- **Updated:** <AUTO_ON_CHANGE: YYYY-MM-DD>
-- **Generated by:** archdoc (cli) v0.1
-
----
-
-## Rails / Tooling
-<!-- ARCHDOC:BEGIN section=rails -->
-> Generated. Do not edit inside this block.
-<AUTO: rails summary + links to config files>
-<!-- ARCHDOC:END section=rails -->
-
----
-
-## Repository layout (top-level)
-<!-- ARCHDOC:BEGIN section=layout -->
-> Generated. Do not edit inside this block.
-<AUTO: table of top-level folders + heuristic purpose + link to layout.md>
-<!-- ARCHDOC:END section=layout -->
-
----
-
-## Modules index
-<!-- ARCHDOC:BEGIN section=modules_index -->
-> Generated. Do not edit inside this block.
-<AUTO: table modules + deps counts + links to module docs>
-<!-- ARCHDOC:END section=modules_index -->
-
----
-
-## Critical dependency points
-<!-- ARCHDOC:BEGIN section=critical_points -->
-> Generated. Do not edit inside this block.
-<AUTO: top fan-in/out symbols + cycles>
-<!-- ARCHDOC:END section=critical_points -->
-
----
-
-<!-- MANUAL:BEGIN -->
-## Change notes (manual)
-- <FILL_MANUALLY>
-<!-- MANUAL:END -->
-"#;
-    
-    let architecture_md_path = std::path::Path::new(root).join("ARCHITECTURE.md");
-    std::fs::write(&architecture_md_path, architecture_md_content)
-        .map_err(|e| anyhow::anyhow!("Failed to create ARCHITECTURE.md: {}", e))?;
-    
-    // Create default archdoc.toml config
-    let config_toml_content = r#"[project]
-root = "."
-out_dir = "docs/architecture"
-entry_file = "ARCHITECTURE.md"
-language = "python"
-
-[scan]
-include = ["src", "app", "tests"]
-exclude = [
-    ".venv", "venv", "__pycache__", ".git", "dist", "build",
-    ".mypy_cache", ".ruff_cache", ".pytest_cache", "*.egg-info"
-]
-follow_symlinks = false
-max_file_size = "10MB"
-
-[python]
-src_roots = ["src", "."]
-include_tests = true
-parse_docstrings = true
-max_parse_errors = 10
-
-[analysis]
-resolve_calls = true
-resolve_inheritance = false
-detect_integrations = true
-integration_patterns = [
-    { type = "http", patterns = ["requests", "httpx", "aiohttp"] },
-    { type = "db", patterns = ["sqlalchemy", "psycopg", "mysql", "sqlite3"] },
-    { type = "queue", patterns = ["celery", "kafka", "pika", "redis"] }
-]
-
-[output]
-single_file = false
-per_file_docs = true
-create_directories = true
-overwrite_manual_sections = false
-
-[diff]
-update_timestamp_on_change_only = true
-hash_algorithm = "sha256"
-preserve_manual_content = true
-
-[thresholds]
-critical_fan_in = 20
-critical_fan_out = 20
-high_complexity = 50
-
-[rendering]
-template_engine = "handlebars"
-max_table_rows = 100
-truncate_long_descriptions = true
-description_max_length = 200
-
-[logging]
-level = "info"
-file = "archdoc.log"
-format = "compact"
-
-[caching]
-enabled = true
-cache_dir = ".archdoc/cache"
-max_cache_age = "24h"
-"#;
-    
-    let config_toml_path = std::path::Path::new(root).join("archdoc.toml");
-    if !config_toml_path.exists() {
-        std::fs::write(&config_toml_path, config_toml_content)
-            .map_err(|e| anyhow::anyhow!("Failed to create archdoc.toml: {}", e))?;
-    }
-    
-    println!("Project initialized successfully!");
-    println!("Created:");
-    println!("  - {}", architecture_md_path.display());
-    println!("  - {}", config_toml_path.display());
-    println!("  - {} (directory structure)", out_path.display());
-    
-    Ok(())
-}
-
-fn load_config(config_path: &str) -> Result<Config> {
-    // TODO: Implement config loading
-    println!("Loading config from {}", config_path);
-    Config::load_from_file(Path::new(config_path))
-        .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))
-}
-
-fn analyze_project(root: &str, config: &Config) -> Result<ProjectModel> {
-    // TODO: Implement project analysis
-    println!("Analyzing project at {} with config", root);
-    
-    // Initialize scanner
-    let scanner = FileScanner::new(config.clone());
-    
-    // Scan for Python files
-    let python_files = scanner.scan_python_files(std::path::Path::new(root))?;
-    
-    // Initialize Python analyzer
-    let analyzer = PythonAnalyzer::new(config.clone());
-    
-    // Parse each Python file
-    let mut parsed_modules = Vec::new();
-    for file_path in python_files {
-        match analyzer.parse_module(&file_path) {
-            Ok(module) => parsed_modules.push(module),
-            Err(e) => {
-                eprintln!("Warning: Failed to parse {}: {}", file_path.display(), e);
-                // Continue with other files
-            }
-        }
-    }
-    
-    // Resolve symbols and build project model
-    analyzer.resolve_symbols(&parsed_modules)
-        .map_err(|e| anyhow::anyhow!("Failed to resolve symbols: {}", e))
-}
-
-fn sanitize_filename(filename: &str) -> String {
-    filename
-        .chars()
-        .map(|c| match c {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            c => c,
-        })
-        .collect()
-}
-
-fn generate_docs(model: &ProjectModel, out: &str, verbose: bool) -> Result<()> {
-    // TODO: Implement documentation generation
-    println!("Generating docs to {}", out);
-    
-    // Create output directory structure if needed
-    let out_path = std::path::Path::new(out);
-    std::fs::create_dir_all(out_path)
-        .map_err(|e| anyhow::anyhow!("Failed to create output directory: {}", e))?;
-    
-    // Create modules and files directories
-    let modules_path = out_path.join("modules");
-    let files_path = out_path.join("files");
-    std::fs::create_dir_all(&modules_path)
-        .map_err(|e| anyhow::anyhow!("Failed to create modules directory: {}", e))?;
-    std::fs::create_dir_all(&files_path)
-        .map_err(|e| anyhow::anyhow!("Failed to create files directory: {}", e))?;
-    
-    // Initialize renderer
-    let renderer = archdoc_core::renderer::Renderer::new();
-    
-    // Initialize writer
-    let writer = archdoc_core::writer::DiffAwareWriter::new();
-    
-    // Write to file - ARCHITECTURE.md should be in the project root, not output directory
-    // The out parameter is for the docs/architecture directory structure
-    let output_path = std::path::Path::new(".").join("ARCHITECTURE.md");
-    
-    // Create individual documentation files for modules and files
-    for (module_id, _module) in &model.modules {
-        let module_doc_path = modules_path.join(format!("{}.md", sanitize_filename(module_id)));
-        match renderer.render_module_md(model, module_id) {
-            Ok(module_content) => {
-                std::fs::write(&module_doc_path, module_content)
-                    .map_err(|e| anyhow::anyhow!("Failed to create module doc {}: {}", module_doc_path.display(), e))?;
-            }
-            Err(e) => {
-                eprintln!("Warning: Failed to render module doc for {}: {}", module_id, e);
-                // Fallback to simple template
-                let module_content = format!("# Module: {}\n\nTODO: Add module documentation\n", module_id);
-                std::fs::write(&module_doc_path, module_content)
-                    .map_err(|e| anyhow::anyhow!("Failed to create module doc {}: {}", module_doc_path.display(), e))?;
-            }
-        }
-    }
-    
-    // Create individual documentation files for files and symbols
-    for (file_id, file_doc) in &model.files {
-        let file_doc_path = files_path.join(format!("{}.md", sanitize_filename(&file_doc.path)));
-        
-        // Create file documentation with symbol sections
-        let mut file_content = format!("# File: {}\n\n", file_doc.path);
-        file_content.push_str(&format!("- **Module:** {}\n", file_doc.module_id));
-        file_content.push_str(&format!("- **Defined symbols:** {}\n", file_doc.symbols.len()));
-        file_content.push_str(&format!("- **Imports:** {}\n\n", file_doc.imports.len()));
-        
-        file_content.push_str("<!-- MANUAL:BEGIN -->\n");
-        file_content.push_str("## File intent (manual)\n");
-        file_content.push_str("<FILL_MANUALLY>\n");
-        file_content.push_str("<!-- MANUAL:END -->\n\n");
-        
-        file_content.push_str("---\n\n");
-        
-        file_content.push_str("## Imports & file-level dependencies\n");
-        file_content.push_str("<!-- ARCHDOC:BEGIN section=file_imports -->\n");
-        file_content.push_str("> Generated. Do not edit inside this block.\n");
-        for import in &file_doc.imports {
-            file_content.push_str(&format!("- {}\n", import));
-        }
-        file_content.push_str("<!-- ARCHDOC:END section=file_imports -->\n\n");
-        
-        file_content.push_str("---\n\n");
-        
-        file_content.push_str("## Symbols index\n");
-        file_content.push_str("<!-- ARCHDOC:BEGIN section=symbols_index -->\n");
-        file_content.push_str("> Generated. Do not edit inside this block.\n");
-        for symbol_id in &file_doc.symbols {
-            if let Some(symbol) = model.symbols.get(symbol_id) {
-                file_content.push_str(&format!("- [{}]({}#{})\n", symbol.qualname, sanitize_filename(&file_doc.path), symbol_id));
-            }
-        }
-        file_content.push_str("<!-- ARCHDOC:END section=symbols_index -->\n\n");
-        
-        file_content.push_str("---\n\n");
-        
-        file_content.push_str("## Symbol details\n");
-        
-        // Add symbol markers for each symbol
-        for symbol_id in &file_doc.symbols {
-            if let Some(_symbol) = model.symbols.get(symbol_id) {
-                if verbose {
-                    println!("Adding symbol marker for {} in {}", symbol_id, file_doc_path.display());
-                }
-                file_content.push_str(&format!("\n<!-- ARCHDOC:BEGIN symbol id={} -->\n", symbol_id));
-                file_content.push_str("<!-- AUTOGENERATED SYMBOL CONTENT WILL BE INSERTED HERE -->\n");
-                file_content.push_str(&format!("<!-- ARCHDOC:END symbol id={} -->\n", symbol_id));
-            }
-        }
-        
-        if verbose {
-            println!("Writing file content to {}: {} chars", file_doc_path.display(), file_content.len());
-            // Show last 500 characters to see if symbol markers are there
-            let len = file_content.len();
-            let start = if len > 500 { len - 500 } else { 0 };
-            println!("Last 500 chars: {}", &file_content[start..]);
-        }
-        std::fs::write(&file_doc_path, file_content)
-            .map_err(|e| anyhow::anyhow!("Failed to create file doc {}: {}", file_doc_path.display(), e))?;
-        
-        // Update each symbol section in the file
-        for symbol_id in &file_doc.symbols {
-            if let Some(_symbol) = model.symbols.get(symbol_id) {
-                match renderer.render_symbol_details(model, symbol_id) {
-                    Ok(content) => {
-                        if verbose {
-                            println!("Updating symbol section for {} in {}", symbol_id, file_doc_path.display());
-                        }
-                        if let Err(e) = writer.update_symbol_section(&file_doc_path, symbol_id, &content) {
-                            eprintln!("Warning: Failed to update symbol section for {}: {}", symbol_id, e);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: Failed to render symbol details for {}: {}", symbol_id, e);
-                    }
-                }
-            }
-        }
-    }
-    
-    // Render and update each section individually
-    
-    // Update integrations section
-    match renderer.render_integrations_section(model) {
-        Ok(content) => {
-            if let Err(e) = writer.update_file_with_markers(&output_path, &content, "integrations") {
-                eprintln!("Warning: Failed to update integrations section: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render integrations section: {}", e);
-        }
-    }
-    
-    // Update rails section
-    match renderer.render_rails_section(model) {
-        Ok(content) => {
-            if let Err(e) = writer.update_file_with_markers(&output_path, &content, "rails") {
-                eprintln!("Warning: Failed to update rails section: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render rails section: {}", e);
-        }
-    }
-    
-    // Update layout section in ARCHITECTURE.md
-    match renderer.render_layout_section(model) {
-        Ok(content) => {
-            if let Err(e) = writer.update_file_with_markers(&output_path, &content, "layout") {
-                eprintln!("Warning: Failed to update layout section: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render layout section: {}", e);
-        }
-    }
-    
-    // Update modules index section
-    match renderer.render_modules_index_section(model) {
-        Ok(content) => {
-            if let Err(e) = writer.update_file_with_markers(&output_path, &content, "modules_index") {
-                eprintln!("Warning: Failed to update modules_index section: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render modules_index section: {}", e);
-        }
-    }
-    
-    // Update critical points section
-    match renderer.render_critical_points_section(model) {
-        Ok(content) => {
-            if let Err(e) = writer.update_file_with_markers(&output_path, &content, "critical_points") {
-                eprintln!("Warning: Failed to update critical_points section: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render critical_points section: {}", e);
-        }
-    }
-    
-    // Update layout.md file
-    let layout_md_path = out_path.join("layout.md");
-    match renderer.render_layout_md(model) {
-        Ok(content) => {
-            // Write the full content to layout.md
-            if let Err(e) = std::fs::write(&layout_md_path, &content) {
-                eprintln!("Warning: Failed to write layout.md: {}", e);
-            }
-        }
-        Err(e) => {
-            eprintln!("Warning: Failed to render layout.md: {}", e);
-        }
-    }
-    
-    Ok(())
-}
-
-fn check_docs_consistency(root: &str, config: &Config) -> Result<()> {
-    // TODO: Implement consistency checking
-    println!("Checking docs consistency for project at {} with config", root);
-    
-    // Analyze project
-    let model = analyze_project(root, config)?;
-    
-    // Generate documentation content - if this succeeds, the analysis is working
-    let renderer = archdoc_core::renderer::Renderer::new();
-    let generated_architecture_md = renderer.render_architecture_md(&model)?;
-    
-    // Read existing documentation
-    let architecture_md_path = std::path::Path::new(root).join(&config.project.entry_file);
-    if !architecture_md_path.exists() {
-        return Err(anyhow::anyhow!("Documentation file {} does not exist", architecture_md_path.display()));
-    }
-    
-    let existing_architecture_md = std::fs::read_to_string(&architecture_md_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", architecture_md_path.display(), e))?;
-    
-    // For V1, we'll just check that we can generate content without errors
-    // A full implementation would compare only the generated sections
-    println!("Documentation analysis successful - project can be documented");
-    println!("Generated content length: {}", generated_architecture_md.len());
-    println!("Existing content length: {}", existing_architecture_md.len());
-    
-    Ok(())
-}
-

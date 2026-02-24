@@ -3,6 +3,7 @@
 //! This module handles generating Markdown documentation from the project model
 //! using templates.
 
+use crate::cycle_detector;
 use crate::model::ProjectModel;
 use handlebars::Handlebars;
 
@@ -18,6 +19,12 @@ fn sanitize_for_link(filename: &str) -> String {
 
 pub struct Renderer {
     templates: Handlebars<'static>,
+}
+
+impl Default for Renderer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Renderer {
@@ -393,7 +400,7 @@ impl Renderer {
         // Collect layout information from files
         let mut layout_items = Vec::new();
         
-        for (_file_id, file_doc) in &model.files {
+        for file_doc in model.files.values() {
             layout_items.push(serde_json::json!({
                 "path": file_doc.path,
                 "purpose": "Source file",
@@ -487,7 +494,14 @@ impl Renderer {
         let data = serde_json::json!({
             "high_fan_in": high_fan_in,
             "high_fan_out": high_fan_out,
-            "cycles": Vec::<String>::new(), // TODO: Implement cycle detection
+            "cycles": cycle_detector::detect_cycles(model)
+                .iter()
+                .map(|cycle| {
+                    serde_json::json!({
+                        "cycle_path": format!("{} → {}", cycle.join(" → "), cycle.first().unwrap_or(&String::new()))
+                    })
+                })
+                .collect::<Vec<_>>(),
         });
         
         // Create a smaller template just for the critical points section
@@ -525,7 +539,7 @@ impl Renderer {
         // Collect layout information from files
         let mut layout_items = Vec::new();
         
-        for (_file_id, file_doc) in &model.files {
+        for file_doc in model.files.values() {
             layout_items.push(serde_json::json!({
                 "path": file_doc.path,
                 "purpose": "Source file",

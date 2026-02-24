@@ -7,6 +7,7 @@ use std::path::Path;
 use crate::errors::ArchDocError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct Config {
     #[serde(default)]
     pub project: ProjectConfig,
@@ -30,22 +31,6 @@ pub struct Config {
     pub caching: CachingConfig,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            project: ProjectConfig::default(),
-            scan: ScanConfig::default(),
-            python: PythonConfig::default(),
-            analysis: AnalysisConfig::default(),
-            output: OutputConfig::default(),
-            diff: DiffConfig::default(),
-            thresholds: ThresholdsConfig::default(),
-            rendering: RenderingConfig::default(),
-            logging: LoggingConfig::default(),
-            caching: CachingConfig::default(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {
@@ -438,6 +423,71 @@ fn default_max_cache_age() -> String {
 }
 
 impl Config {
+    /// Validate the configuration for correctness.
+    ///
+    /// Checks that paths exist, values are parseable, and settings are sensible.
+    pub fn validate(&self) -> Result<(), ArchDocError> {
+        // Check project.root exists and is a directory
+        let root = Path::new(&self.project.root);
+        if !root.exists() {
+            return Err(ArchDocError::ConfigError(format!(
+                "project.root '{}' does not exist",
+                self.project.root
+            )));
+        }
+        if !root.is_dir() {
+            return Err(ArchDocError::ConfigError(format!(
+                "project.root '{}' is not a directory",
+                self.project.root
+            )));
+        }
+
+        // Check language is python
+        if self.project.language != "python" {
+            return Err(ArchDocError::ConfigError(format!(
+                "project.language '{}' is not supported. Only 'python' is currently supported",
+                self.project.language
+            )));
+        }
+
+        // Check scan.include is not empty
+        if self.scan.include.is_empty() {
+            return Err(ArchDocError::ConfigError(
+                "scan.include must not be empty — at least one directory must be specified".to_string(),
+            ));
+        }
+
+        // Check python.src_roots exist relative to project.root
+        for src_root in &self.python.src_roots {
+            let path = root.join(src_root);
+            if !path.exists() {
+                return Err(ArchDocError::ConfigError(format!(
+                    "python.src_roots entry '{}' does not exist (resolved to '{}')",
+                    src_root,
+                    path.display()
+                )));
+            }
+        }
+
+        // Parse max_cache_age
+        parse_duration(&self.caching.max_cache_age).map_err(|e| {
+            ArchDocError::ConfigError(format!(
+                "caching.max_cache_age '{}' is not valid: {}. Use formats like '24h', '7d', '30m'",
+                self.caching.max_cache_age, e
+            ))
+        })?;
+
+        // Parse max_file_size
+        parse_file_size(&self.scan.max_file_size).map_err(|e| {
+            ArchDocError::ConfigError(format!(
+                "scan.max_file_size '{}' is not valid: {}. Use formats like '10MB', '1GB', '500KB'",
+                self.scan.max_file_size, e
+            ))
+        })?;
+
+        Ok(())
+    }
+
     /// Load configuration from a TOML file
     pub fn load_from_file(path: &Path) -> Result<Self, ArchDocError> {
         let content = std::fs::read_to_string(path)
@@ -454,5 +504,132 @@ impl Config {
         
         std::fs::write(path, content)
             .map_err(|e| ArchDocError::ConfigError(format!("Failed to write config file: {}", e)))
+    }
+}
+
+/// Parse a duration string like "24h", "7d", "30m" into seconds.
+pub fn parse_duration(s: &str) -> Result<u64, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty duration string".to_string());
+    }
+
+    let (num_str, suffix) = split_numeric_suffix(s)?;
+    let value: u64 = num_str
+        .parse()
+        .map_err(|_| format!("'{}' is not a valid number", num_str))?;
+
+    match suffix {
+        "s" => Ok(value),
+        "m" => Ok(value * 60),
+        "h" => Ok(value * 3600),
+        "d" => Ok(value * 86400),
+        "w" => Ok(value * 604800),
+        _ => Err(format!("unknown duration suffix '{}'. Use s, m, h, d, or w", suffix)),
+    }
+}
+
+/// Parse a file size string like "10MB", "1GB", "500KB" into bytes.
+pub fn parse_file_size(s: &str) -> Result<u64, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty file size string".to_string());
+    }
+
+    let (num_str, suffix) = split_numeric_suffix(s)?;
+    let value: u64 = num_str
+        .parse()
+        .map_err(|_| format!("'{}' is not a valid number", num_str))?;
+
+    let suffix_upper = suffix.to_uppercase();
+    match suffix_upper.as_str() {
+        "B" => Ok(value),
+        "KB" | "K" => Ok(value * 1024),
+        "MB" | "M" => Ok(value * 1024 * 1024),
+        "GB" | "G" => Ok(value * 1024 * 1024 * 1024),
+        _ => Err(format!("unknown size suffix '{}'. Use B, KB, MB, or GB", suffix)),
+    }
+}
+
+fn split_numeric_suffix(s: &str) -> Result<(&str, &str), String> {
+    let pos = s
+        .find(|c: char| !c.is_ascii_digit())
+        .ok_or_else(|| format!("no unit suffix found in '{}'", s))?;
+    if pos == 0 {
+        return Err(format!("no numeric value found in '{}'", s));
+    }
+    Ok((&s[..pos], &s[pos..]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_duration() {
+        assert_eq!(parse_duration("24h").unwrap(), 86400);
+        assert_eq!(parse_duration("7d").unwrap(), 604800);
+        assert_eq!(parse_duration("30m").unwrap(), 1800);
+        assert_eq!(parse_duration("60s").unwrap(), 60);
+        assert!(parse_duration("abc").is_err());
+        assert!(parse_duration("").is_err());
+        assert!(parse_duration("10x").is_err());
+    }
+
+    #[test]
+    fn test_parse_file_size() {
+        assert_eq!(parse_file_size("10MB").unwrap(), 10 * 1024 * 1024);
+        assert_eq!(parse_file_size("1GB").unwrap(), 1024 * 1024 * 1024);
+        assert_eq!(parse_file_size("500KB").unwrap(), 500 * 1024);
+        assert!(parse_file_size("abc").is_err());
+        assert!(parse_file_size("").is_err());
+    }
+
+    #[test]
+    fn test_validate_default_config() {
+        // Default config with "." as root should validate if we're in a valid dir
+        let config = Config::default();
+        // This should work since "." exists and is a directory
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_bad_language() {
+        let mut config = Config::default();
+        config.project.language = "java".to_string();
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("not supported"));
+    }
+
+    #[test]
+    fn test_validate_empty_include() {
+        let mut config = Config::default();
+        config.scan.include = vec![];
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn test_validate_bad_root() {
+        let mut config = Config::default();
+        config.project.root = "/nonexistent/path/xyz".to_string();
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_validate_bad_cache_age() {
+        let mut config = Config::default();
+        config.caching.max_cache_age = "invalid".to_string();
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("not valid"));
+    }
+
+    #[test]
+    fn test_validate_bad_file_size() {
+        let mut config = Config::default();
+        config.scan.max_file_size = "notasize".to_string();
+        let err = config.validate().unwrap_err();
+        assert!(err.to_string().contains("not valid"));
     }
 }
